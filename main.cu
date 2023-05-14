@@ -10,27 +10,27 @@
 #define CHANNEL_NUMBER 3
 
 
-unsigned int* RBGToBW (unsigned char* image, int arraySize) {
-    unsigned int* output = new unsigned int[arraySize / CHANNEL_NUMBER];
+unsigned int* rgb_to_bw (const unsigned char* image, int array_size) {
+    auto* output = new unsigned int[array_size / CHANNEL_NUMBER];
 
-    int sum = 0;
+    int color_sum = 0;
 
-    for (int i = 0; i < arraySize; i++) {
-        sum += image[i];
+    for (int i = 0; i < array_size; i++) {
+        color_sum += image[i];
         if ((i + 1) % CHANNEL_NUMBER == 0) {
-            if (sum > 0) output[i / CHANNEL_NUMBER] = 1;
+            if (color_sum > 0) output[i / CHANNEL_NUMBER] = 1;
             else output[i / CHANNEL_NUMBER] = 0;
-            sum = 0;
+            color_sum = 0;
         }
     }
 
     return output;
 }
 
-unsigned char* BWToRGB (unsigned int* image, int arraySize) {
-    unsigned char* output = new unsigned char[arraySize * CHANNEL_NUMBER];
+unsigned char* bw_to_rgb (const unsigned int* image, int array_size) {
+    auto* output = new unsigned char[array_size * CHANNEL_NUMBER];
 
-    for (int i = 0; i < arraySize; i++) {
+    for (int i = 0; i < array_size; i++) {
         for (int j = 0; j < CHANNEL_NUMBER; j++) {
             output[i * CHANNEL_NUMBER + j] = 255 * image[i];
         }
@@ -39,79 +39,76 @@ unsigned char* BWToRGB (unsigned int* image, int arraySize) {
     return output;
 }
 
-__global__ void erosion_kernel(unsigned int* input, unsigned int* output, int width, int height) {
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
+__global__ void erosion_kernel(unsigned int* image, int width, int height) {
+    auto x = blockIdx.x * blockDim.x + threadIdx.x;
+    auto y = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (x < width && y < height) {
-        int output_value = input[y * width + x]; // get center pixel value
+        auto output_value = image[y * width + x]; // get center pixel value
 
-        if (y > 0 && input[(y - 1) * width + x] < output_value) {
-            output_value = input[(y - 1) * width + x]; // check top pixel
+        if (y > 0 && image[(y - 1) * width + x] < output_value) {
+            output_value = image[(y - 1) * width + x]; // check top pixel
         }
 
-        if (y < height - 1 && input[(y + 1) * width + x] < output_value) {
-            output_value = input[(y + 1) * width + x]; // check bottom pixel
+        if (y < height - 1 && image[(y + 1) * width + x] < output_value) {
+            output_value = image[(y + 1) * width + x]; // check bottom pixel
         }
 
-        if (x > 0 && input[y * width + (x - 1)] < output_value) {
-            output_value = input[y * width + (x - 1)]; // check left pixel
+        if (x > 0 && image[y * width + (x - 1)] < output_value) {
+            output_value = image[y * width + (x - 1)]; // check left pixel
         }
 
-        if (x < width - 1 && input[y * width + (x + 1)] < output_value) {
-            output_value = input[y * width + (x + 1)]; // check right pixel
+        if (x < width - 1 && image[y * width + (x + 1)] < output_value) {
+            output_value = image[y * width + (x + 1)]; // check right pixel
         }
 
-        output[y * width + x] = output_value; // write output value to output data array
+        image[y * width + x] = output_value; // write output value to output data array
     }
 }
 
 int main() {
-    int width, height, bpp;
+    int width, height, chif, erosion_level;
 
-    int erosionDepth = 1;
+    std::cout << "Choose erosion level (uint from 1 to uint max): ";
+    std::cin >> erosion_level;
 
-    std::cout << "Erosion depth / level (uint from 1 to uint max): ";
-    std::cin >> erosionDepth;
+    std::filesystem::path input_path = std::filesystem::current_path().parent_path();
+    input_path /= "image.png";
 
-    std::filesystem::path path = std::filesystem::current_path().parent_path();
-    path /= "image.png";
+    std::filesystem::path output_path = std::filesystem::current_path().parent_path();
+    output_path /= "eroded_image.png";
 
-    unsigned char* image = stbi_load(path.string().c_str(), &width, &height, &bpp, CHANNEL_NUMBER);
+    unsigned char* image = stbi_load(input_path.string().c_str(), &width, &height, &chif, CHANNEL_NUMBER);
     std::cout << "Loaded image" << std::endl;
 
-    unsigned int* host_input = RBGToBW(image, width * height * CHANNEL_NUMBER);
-    unsigned int* host_output = (unsigned int*)malloc(width * height * sizeof(unsigned int));
-    unsigned int* device_input;
-    unsigned int* device_output;
+    unsigned int* host_input = rgb_to_bw(image, width * height * CHANNEL_NUMBER);
+    auto* host_output = (unsigned int*)malloc(width * height * sizeof(unsigned int));
+    unsigned int* device;
 
-    cudaMalloc((void**)&device_input, width * height * sizeof(unsigned int));
-    cudaMalloc((void**)&device_output, width * height * sizeof(unsigned int));
+    cudaMalloc((void**)&device, width * height * sizeof(unsigned int));
 
-    cudaMemcpy(device_input, host_input, width * height * sizeof(unsigned int), cudaMemcpyHostToDevice);
+    cudaMemcpy(device, host_input, width * height * sizeof(unsigned int), cudaMemcpyHostToDevice);
 
     dim3 block_size(32, 32);
     dim3 grid_size((width + block_size.x - 1) / block_size.x, (height + block_size.y - 1) / block_size.y);
 
-    for (int i = 0; i < erosionDepth; i++) {
-        erosion_kernel<<<grid_size, block_size>>>(device_input, device_output, width, height);
-        cudaMemcpy(device_input, device_output, width * height * sizeof(unsigned int), cudaMemcpyDeviceToDevice);
+    for (int i = 0; i < erosion_level; i++) {
+        erosion_kernel<<<grid_size, block_size>>>(device, width, height);
     }
 
-    cudaMemcpy(host_output, device_output, width * height * sizeof(unsigned int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(host_output, device, width * height * sizeof(unsigned int), cudaMemcpyDeviceToHost);
 
-    image = BWToRGB(host_output, width * height);
+    image = bw_to_rgb(host_output, width * height);
 
-    stbi_write_png(path.string().c_str(), width, height, CHANNEL_NUMBER, image, width * CHANNEL_NUMBER);
+    stbi_write_png(output_path.string().c_str(), width, height, CHANNEL_NUMBER, image, width * CHANNEL_NUMBER);
+    std::cout << "Save image" << std::endl;
 
-    cudaFree(device_input);
-    cudaFree(device_output);
+    cudaFree(device);
 
     free(host_input);
     free(host_output);
 
     delete[] image;
 
-    std::cout << "Save image" << std::endl;
     return 0;
 }
