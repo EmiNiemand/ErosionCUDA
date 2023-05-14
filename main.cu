@@ -10,8 +10,7 @@
 
 #define CHANNEL_NUMBER 3
 
-int main(int, char**)
-{
+int main() {
     int width, height, bpp;
 
     std::filesystem::path path = std::filesystem::current_path().parent_path();
@@ -31,5 +30,4 @@ int main(int, char**)
     stbi_image_free(rgb_image);
 
     std::cout << "Save image" << std::endl;
-    return 0;
 }
